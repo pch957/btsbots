@@ -1,0 +1,60 @@
+{
+  "strategies": {
+    "simple": {
+      "strategy_name": "SimpleMaker",
+      "description": "基于公允法定价值 (CNY) 的简单双向做市",
+      "block_delay": 1.0,
+      "keep_bts_fees": 20.0,
+      "custom_price": { "CNY": [13.597625854, "BTS"] },
+      "default": { "freq": 2, "maker_spread": 1.5, "target_order_cny": 50.0 },
+      "markets": [["BTS", "CNY"], ["BTS", "USD"]]
+    },
+    "grid": {
+      "strategy_name": "DynamicGrid",
+      "description": "盘口中轴锚定与严格双向 Maker 保护的多档动态等比网格",
+      "block_delay": 1.0,
+      "keep_bts_fees": 20.0,
+      "custom_price": { "USD": [1.02, "USD"] },
+      "default": {
+        "freq": 2,
+        "grid_levels": 3,
+        "grid_step_pct": 1.2,
+        "target_order_cny": 30.0
+      },
+      "markets": [
+        ["USD", "CNY"]
+      ]
+    },
+    "arbitrage": {
+      "strategy_name": "UniversalArbitrage",
+      "description": "基于负对数图算法的任意 N 环路原子无损套利 (支持 2环/3环/4环)",
+      "block_delay": 0.5,
+      "keep_bts_fees": 30.0,
+      "min_profit_pct": 0.5,
+      "trade_amount_cny": 100.0,
+      "max_cycle_length": 4,
+      "markets": [
+        ["BTS", "CNY"],
+        ["BTS", "USD"],
+        ["CNY", "USD"]
+      ]
+    },
+    "bollinger": {
+      "strategy_name": "BollingerMeanReversion",
+      "description": "基于布林带通道与波动率偏离的均值回归做市策略",
+      "block_delay": 1.0,
+      "keep_bts_fees": 20.0,
+      "custom_price": {},
+      "default": {
+        "freq": 2,
+        "window_size": 20,
+        "k_std": 2.0,
+        "target_order_cny": 50.0
+      },
+      "markets": [
+        ["BTS", "CNY"],
+        ["BTS", "USD"]
+      ]
+    }
+  }
+}

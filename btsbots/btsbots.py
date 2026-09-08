@@ -10,17 +10,14 @@ class BTSBots(BotsClient):
 
     async def make_transaction(self, raw_ops: list[dict], isSim: bool=False) -> int:
         """
-        接受交易请求并完成签名广播
+        接受交易请求数组，填充手续费，作为一个完整的 transaction 提交签名广播
         """
         try:
-            # 1. 构建 operations
             ops = []
             for raw_op in raw_ops:
                 op = await self._build_op(self.bts_id, raw_op)
                 ops.append(op)
-            # 2. 填充链上手续费
             self._fill_ops_fee(ops)
-            # 3. 签名并广播 (指定使用 Active Key)
             block = await self._sign_and_broadcast(ops, isSim)
             return block
         except Exception as e:
@@ -58,27 +55,31 @@ class BTSBots(BotsClient):
             raise KeyError("本地内存中暂未接收到同步的费率数据。")
         global_doc = next((doc for doc in global_coll.values() if doc.get("id") == "2.0.0"))
         fee_doc = global_doc["parameters"].get("current_fees", {}).get("parameters", [])
+        fee_map = {item[0]: item[1] for item in fee_doc if isinstance(item, list) and len(item) == 2}
 
         for op in ops:
-            self._fill_op_fee(op, fee_doc)
+            self._fill_op_fee(op, fee_map)
 
-    def _fill_op_fee(self, op: list, fee_doc: dict):
+    def _fill_op_fee(self, op: list, fee_map: dict):
         from binascii import unhexlify
         op_code = op[0]
-        item = fee_doc[op_code]
-        if op_code == 5: # account_create
-            calculated_fee = int(item[1].get("basic_fee"))
-            total_bytes = 143 + len((op[1]["name"]).encode('utf-8'))
-            calculated_fee += total_bytes * item[1].get("price_per_kbyte") // 1024
+        if op_code not in fee_map:
+            calculated_fee = 0
         else:
-            calculated_fee = int(item[1].get("fee"))
+            item = fee_map[op_code]
+            if op_code == 5:  # account_create
+                calculated_fee = int(item.get("basic_fee", 0))
+                total_bytes = 143 + len((op[1]["name"]).encode('utf-8'))
+                calculated_fee += total_bytes * item.get("price_per_kbyte", 0) // 1024
+            else:
+                calculated_fee = int(item.get("fee", 0))
 
-        if op_code == 0 and op[1].get("memo"): # transfer memo
-            cipher_bytes_len = len(unhexlify(op[1]["memo"]["message"]))
-            varint_len = 2
-            total_bytes = 33 + 33 + 8 + varint_len + cipher_bytes_len
-            calculated_fee += total_bytes * item[1].get("price_per_kbyte") // 1024
-        
+            if op_code == 0 and op[1].get("memo"):  # transfer memo
+                cipher_bytes_len = len(unhexlify(op[1]["memo"]["message"]))
+                varint_len = 2
+                total_bytes = 33 + 33 + 8 + varint_len + cipher_bytes_len
+                calculated_fee += total_bytes * item.get("price_per_kbyte", 0) // 1024
+
         op[1]["fee"]["amount"] = calculated_fee
 
     async def _sign_and_broadcast(self, ops: list, isSim: bool=False) -> int:
@@ -95,7 +96,6 @@ class BTSBots(BotsClient):
                 "operations": ops
             }
 
-            # 🌟 必须使用账号的 Active Key 签署交易
             active_pub = await self._resolve_account_active_pubkey(self.account_name)
             finalized_tx_json = self.key_manager.sign_transaction(active_pub, payload)
 
@@ -125,6 +125,8 @@ class BTSBots(BotsClient):
             _op = await self._build_op_limit_order_create(uid, op_params)
         elif op_type == "limit_order_cancel":
             _op = await self._build_op_limit_order_cancel(uid, op_params)
+        elif op_type == "limit_order_update":
+            _op = await self._build_op_limit_order_update(uid, op_params)
         elif op_type == "account_create":
             _op = await self._build_op_account_create(uid, op_params)
         elif op_type == "withdraw_vesting":
@@ -184,19 +186,87 @@ class BTSBots(BotsClient):
                 "asset_id": recv_id
             },
             "expiration": expiration,
-            "fill_or_kill": bool(op_params.get('fill_or_kill')),
+            "fill_or_kill": bool(op_params.get('fill_or_kill', False)),
             "extensions": []
         }
         return [1, order_payload]
 
     async def _build_op_limit_order_cancel(self, uid: str, op_params: dict) -> list:
+        raw_order_id = str(op_params.get("order_id")).replace("~", "").strip()
+        order_id = raw_order_id if raw_order_id.startswith("1.7.") else f"1.7.{raw_order_id}"
+
         cancel_payload = {
             "fee": {"amount": 0, "asset_id": "1.3.0"},
             "fee_paying_account": str(uid),
-            "order": str(op_params.get("order_id")),
+            "order": order_id,
             "extensions": []
         }
         return [2, cancel_payload]
+
+    async def _build_op_limit_order_update(self, uid: str, op_params: dict) -> list:
+        """
+        BitShares limit_order_update_operation (opcode: 77)
+        精准保证 new_price.base.amount <= max_amount_for_sale
+        """
+        raw_order_id = str(op_params.get("order_id")).replace("~", "").strip()
+        order_id = raw_order_id if raw_order_id.startswith("1.7.") else f"1.7.{raw_order_id}"
+
+        update_payload = {
+            "fee": {"amount": 0, "asset_id": "1.3.0"},
+            "seller": str(uid),
+            "order": order_id,
+            "new_price": None,
+            "delta_amount_to_sell": None,
+            "new_expiration": None,
+            "on_fill": None,
+            "extensions": []
+        }
+
+        sell_symbol = str(op_params["sell_asset"]).upper().strip()
+        recv_symbol = str(op_params["receive_asset"]).upper().strip()
+        _, sell_id, sell_prec = await self.get_asset_brief(sell_symbol)
+        _, recv_id, recv_prec = await self.get_asset_brief(recv_symbol)
+
+        # 1. 解析 delta_amount_to_sell
+        raw_delta = 0
+        if "delta_amount_to_sell" in op_params and op_params["delta_amount_to_sell"] is not None:
+            delta_val = float(op_params["delta_amount_to_sell"])
+            raw_delta = int(delta_val * (10 ** sell_prec))
+            if raw_delta != 0:
+                update_payload["delta_amount_to_sell"] = {
+                    "amount": raw_delta,
+                    "asset_id": sell_id
+                }
+
+        # 2. 解析 new_price
+        if "price" in op_params and op_params["price"] is not None:
+            # 基础卖出量：若传了 base_for_sale 则取其与 delta 的合计，确保 base.amount <= 链上实际剩余挂单量
+            if "base_for_sale" in op_params and op_params["base_for_sale"] is not None:
+                amount_base = float(op_params["base_for_sale"]) + (raw_delta / (10 ** sell_prec))
+            else:
+                amount_base = float(op_params.get("amount", 10.0))
+
+            if amount_base <= 0:
+                amount_base = float(op_params.get("amount", 1.0))
+
+            raw_sell_amount = int(amount_base * (10 ** sell_prec))
+            raw_recv_amount = int((amount_base * float(op_params["price"])) * (10 ** recv_prec))
+
+            update_payload["new_price"] = {
+                "base": {
+                    "amount": raw_sell_amount,
+                    "asset_id": sell_id
+                },
+                "quote": {
+                    "amount": raw_recv_amount,
+                    "asset_id": recv_id
+                }
+            }
+
+        if "new_expiration" in op_params and op_params["new_expiration"]:
+            update_payload["new_expiration"] = op_params["new_expiration"]
+
+        return [77, update_payload]
 
     async def _build_op_account_create(self, uid: str, op_params: dict) -> list:
         account_create_payload = {
@@ -229,7 +299,6 @@ class BTSBots(BotsClient):
         return [5, account_create_payload]
 
     async def _build_op_withdraw_vesting(self, uid: str, op_params: dict) -> list:
-        """实现 BitShares 提现归属余额操作 (opcode 33: withdraw_vesting)"""
         asset_symbol_or_id = op_params["asset"]
         if asset_symbol_or_id.startswith("1.3."):
             asset_id = asset_symbol_or_id
@@ -251,21 +320,14 @@ class BTSBots(BotsClient):
         return [33, withdraw_payload]
 
     async def encrypt_memo(self, op_params: dict) -> dict:
-        """
-        Memo 加密策略：
-        1. 接收方：提取目标账号的 Memo Key (k.m)；
-        2. 发起方：优先使用当前账号的 Memo Key，若不在本地密钥库中，降级尝试 Active Key；若均不在则报错。
-        """
         if not self.key_manager:
             raise ValueError("密钥管理器未初始化")
 
-        # 1. 目标公钥
         to_account_info = await self.get_account_info(op_params.get("to_account"))
         to_memo_pub = to_account_info.get('k', {}).get('m')
         if not to_memo_pub:
             raise ValueError(f"目标账号 [{op_params.get('to_account')}] 未在链上设置 Memo Key")
 
-        # 2. 本方公钥选择 (优先 Memo Key，降级 Active Key)
         my_account_info = await self.get_account_info(self.account_name)
         my_memo_pub = my_account_info.get('k', {}).get('m')
         my_active_keys = my_account_info.get('k', {}).get('a', [])
@@ -288,10 +350,6 @@ class BTSBots(BotsClient):
         return self.key_manager.encrypt_memo(chosen_my_pub, to_memo_pub, op_params["memo"])
 
     async def decrypt_memo(self, memo_info: dict) -> str:
-        """
-        Memo 解密策略：
-        检查链上 memo 信息中包含的通信双方公钥 (k: [pub1, pub2])，自动查找哪一把存在于本地密钥库，显式传参解密。
-        """
         if not self.key_manager:
             raise ValueError("密钥管理器未初始化")
 

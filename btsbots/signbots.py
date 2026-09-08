@@ -359,15 +359,16 @@ class SignBots(BTSBots):
             raise KeyError("本地内存中暂未接收到同步的费率数据。")
         global_doc = next((doc for doc in global_coll.values() if doc.get("id") == "2.0.0"))
         fee_doc = global_doc["parameters"].get("current_fees", {}).get("parameters", [])
+        fee_map = {item[0]: item[1] for item in fee_doc if isinstance(item, list) and len(item) == 2}
         fee_limit = self.config.get("fee_limit", 10)
         for index in op_types:
-            item = fee_doc[index]
+            item = fee_map[index]
             if index == 5:
-                fee = (item[1].get("basic_fee") + 0.1*item[1].get("price_per_kbyte")) / 10**5
+                fee = (item.get("basic_fee") + 0.1*item.get("price_per_kbyte")) / 10**5
             elif index == 0:
-                fee = (item[1].get("fee") + 0.1*item[1].get("price_per_kbyte")) / 10**5
+                fee = (item.get("fee") + 0.1*item.get("price_per_kbyte")) / 10**5
             else:
-                fee = int(item[1].get("fee")) / 10**5
+                fee = int(item.get("fee")) / 10**5
             if fee > fee_limit:
                 return False, f"交易费用 {fee} BTS，超过风控限制 ({fee_limit} BTS)"
         return True, ""

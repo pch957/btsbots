@@ -4,6 +4,8 @@ from btsbots.meteor_client import MeteorDDPClient
 from btsbots.bots_client import BotsClient
 from btsbots.btsbots import BTSBots
 from btsbots.signbots import SignBots
+from btsbots.bizbots import BizBots
+from btsbots.tradebots import TradeBots
 
 __all__ = [
     "PrivateKey",
@@ -12,5 +14,7 @@ __all__ = [
     "MeteorDDPClient",
     "BotsClient",
     "BTSBots",
-    "SignBots"
+    "SignBots",
+    "BizBots",
+    "TradeBots"
 ]

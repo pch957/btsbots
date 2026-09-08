@@ -235,7 +235,7 @@ class BotsKey:
     @sandbox_execute
     def sign_transaction(self, decrypted_store: dict, pub_key: str, payload: dict) -> dict:
         """使用指定的公钥对 BitShares 交易载荷进行序列化签名"""
-        import bitsharesbase.signedtransactions as transactions
+        import btsbots.custom_tx as transactions
         from binascii import unhexlify, hexlify
 
         clean_pub = str(pub_key).strip()
@@ -244,7 +244,7 @@ class BotsKey:
 
         pKey = PrivateKey.from_wif(decrypted_store[clean_pub].decode('utf-8'))
 
-        transaction = transactions.Signed_Transaction(
+        transaction = transactions.New_Signed_Transaction(
             ref_block_num=payload["ref_block_num"],
             ref_block_prefix=payload["ref_block_prefix"],
             expiration=payload["expiration"],
