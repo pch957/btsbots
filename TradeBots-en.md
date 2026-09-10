@@ -9,18 +9,69 @@
 ### Launching Quantitative Strategy Bots
 
 ```bash
-# 1. Run the simple maker strategy
+# 1. Run the AI Autonomous Trading Agent (supports Google AI Studio, OpenAI, DeepSeek, Ollama)
+GEMINI_API_KEY="AIzaSy..." uv run trade_bots_ai.py --pass btsbots/my_account --strategy ai_agent
+
+# 2. Run the simple maker strategy
 uv run trade_bots.py --pass btsbots/my_account --strategy simple
 
-# 2. Run the dynamic multi-grid strategy
+# 3. Run the dynamic multi-grid strategy
 uv run trade_bots_grid.py --pass btsbots/my_account --strategy grid
 
-# 3. Run the universal N-cycle atomic arbitrage strategy
+# 4. Run the universal N-cycle atomic arbitrage strategy
 uv run trade_bots_arbitrage.py --pass btsbots/my_account --strategy arbitrage
 
-# 4. Run the Bollinger Bands mean reversion strategy
+# 5. Run the Bollinger Bands mean reversion strategy
 uv run trade_bots_bollinger.py --pass btsbots/my_account --strategy bollinger
 ```
+
+---
+
+## 🧠 AI Autonomous Trading Agent (`trade_bots_ai.py`)
+
+`AITradingAgent` connects modern Large Language Models (LLMs) with high-frequency decentralized blockchain trading engines. It delivers a comprehensive 360° structured market context to the AI, protected by a zero-trust hard-coded risk firewall (Guardrails).
+
+### 1. Architecture & Decision Pipeline
+
+```text
+       ┌────────────────────────────────────────────────────────┐
+       │             Meteor DDP Real-time Trade Stream          │
+       └───────────────────────────┬────────────────────────────┘
+                                   │
+       ┌───────────────────────────▼────────────────────────────┐
+       │             360° Decision Context Builder              │
+       │  • Account Portfolio, Balances & Max Holding Cap (CNY) │
+       │  • Top 5 Depth, Micro-liquidity & Price Physical Units │
+       │  • Trade History & Real-time Fiat PnL Tracker Dashboard│
+       │  • Market Coverage & Partial Fill Health Diagnostics   │
+       │  • Dynamic Inventory Skew Pricing Guidance             │
+       └───────────────────────────┬────────────────────────────┘
+                                   │ JSON Context Prompt
+       ┌───────────────────────────▼────────────────────────────┐
+       │              Mainstream LLM Reasoning Engine           │
+       │     (Gemini 2.0 / GPT-4o / DeepSeek / Ollama)          │
+       └───────────────────────────┬────────────────────────────┘
+                                   │ Structured Output Intents
+       ┌───────────────────────────▼────────────────────────────┐
+       │             🛡️ Zero-Trust Guardrails Firewall          │
+       │  • Market Scoping Guard: Isolates unconfigured markets │
+       │  • Order Volume Cap: Enforces target_order_cny limits  │
+       │  • Max Holding Cap Enforcement (max_holding_cny)       │
+       │  • Anti Self-Match Guard: Prohibits zero-spread trades │
+       │  • Auto Redundant Order Cleanup (Cancel Duplicate)     │
+       └───────────────────────────┬────────────────────────────┘
+                                   │ Batched Atomic Broadcast
+       ┌───────────────────────────▼────────────────────────────┐
+       │          BitShares Blockchain Native Execution         │
+       └────────────────────────────────────────────────────────┘
+```
+
+### 2. Core Highlights of the AI Agent
+- **Free Google AI Studio Native Integration**: Runs with `gemini-2.0-flash`, offering high throughput and zero subscription costs.
+- **Intelligent Gating & Silent Heartbeat**: Only invokes the AI when actionable events occur (missing legs, 50% partial fills, price shifts). Stays completely silent during calm periods.
+- **Dynamic Inventory Skew**: Gradually skews buy prices further downward as holdings approach the `max_holding_cny` cap to manage inventory risk. Assets without a cap are treated as unlimited.
+- **Multi-Asset PnL Dashboard**: Summarizes matched fill count, trading turnover, and net fiat PnL on startup.
+- **Physical Unit Disambiguation**: Clearly distinguishes price units for `A/B` markets as `B per 1 A`, preventing reversed price mistakes.
 
 ---
 
@@ -47,11 +98,33 @@ uv run trade_bots_bollinger.py --pass btsbots/my_account --strategy bollinger
 
 ---
 
-## ⚙️ Configuration Reference (`trade_rules.json`)
+## ⚙️ Configuration Reference (`trade_rules.json` / `trade_rules-example.json`)
 
 ```json
 {
   "strategies": {
+    "ai_agent": {
+      "strategy_name": "AITradingAgent",
+      "description": "Autonomous quantitative trading Agent powered by Google AI Studio / OpenAI",
+      "block_delay": 1.0,
+      "keep_bts_fees": 30.0,
+      "max_holding_cny": {
+        "XBTSX.USDT": 2000.0,
+        "CNY": 5000.0,
+        "BTS": 10000.0
+      },
+      "ai_agent": {
+        "provider": "gemini",
+        "model": "gemini-2.0-flash",
+        "api_base": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "api_key": "YOUR_GEMINI_API_KEY",
+        "max_price_deviation_pct": 15.0,
+        "min_maker_spread_pct": 1.5
+      },
+      "custom_price": { "CNY": [13.597625854, "BTS"] },
+      "default": { "target_order_cny": 50.0 },
+      "markets": [["BTS", "CNY"], ["BTS", "XBTSX.USDT"]]
+    },
     "simple": {
       "strategy_name": "SimpleMaker",
       "description": "Simple market maker strategy based on Fiat CNY valuation",
@@ -111,6 +184,7 @@ uv run trade_bots_bollinger.py --pass btsbots/my_account --strategy bollinger
 | `self.get_total_balance(asset)` | `asset: str` | `float` | Gets total holding (free + in-order locked) |
 | `self.get_my_orders(sell, recv)`| `sell, recv: Optional[str]` | `List[dict]` | Gets active orders belonging to this account |
 | `self.get_market_orders(sell, recv)` | `sell, recv: str` | `List[dict]` | Gets orderbook depth orders excluding own account (sorted by price asc) |
+| `self.calculate_market_pnl(markets)` | `markets: Optional[list]` | `dict` | Calculates fill count, turnover, and net fiat PnL for target markets |
 | `self.get_order_by_id(order_id)` | `order_id: str` | `Optional[dict]` | Retrieves full order details from local cache |
 | `self.is_chain_synced()` | None | `Tuple[bool, delay, ts]`| Checks if blockchain head stream timestamp is synchronized |
 

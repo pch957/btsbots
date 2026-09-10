@@ -6,21 +6,72 @@
 
 ## 🚀 快速上手
 
-### 启动内置量化策略机器人
+### 启动量化与 AI Agent 策略机器人
 
 ```bash
-# 1. 简单法定做市策略 (SimpleMaker)
+# 1. 启动 AI 自主交易 Agent 机器人 (支持 Google AI Studio / OpenAI / DeepSeek / Ollama)
+GEMINI_API_KEY="AIzaSy..." uv run trade_bots_ai.py --pass btsbots/my_account --strategy ai_agent
+
+# 2. 启动简单法定做市策略 (SimpleMaker)
 uv run trade_bots.py --pass btsbots/my_account --strategy simple
 
-# 2. 动态自适应多档网格策略 (DynamicGrid - 震荡收割机)
+# 3. 启动动态自适应多档网格策略 (DynamicGrid - 震荡收割机)
 uv run trade_bots_grid.py --pass btsbots/my_account --strategy grid
 
-# 3. 通用 N 环路原子无损套利策略 (UniversalArbitrage - 负对数图算法)
+# 4. 启动通用 N 环路原子无损套利策略 (UniversalArbitrage - 负对数图算法)
 uv run trade_bots_arbitrage.py --pass btsbots/my_account --strategy arbitrage
 
-# 4. 布林带均值回归做市策略 (BollingerMeanReversion)
+# 5. 启动布林带均值回归做市策略 (BollingerMeanReversion)
 uv run trade_bots_bollinger.py --pass btsbots/my_account --strategy bollinger
 ```
+
+---
+
+## 🧠 AI 自主交易 Agent (`trade_bots_ai.py`)
+
+`AITradingAgent` 将大语言模型（LLM）与去中心化区块链高频交易引擎深度结合，为 AI 提供 360° 结构化全景市场决策上下文，并由底层的零信任硬风控护栏（Guardrails）确保每一笔链上操作的安全合规。
+
+### 1. 核心架构与决策流
+
+```text
+       ┌────────────────────────────────────────────────────────┐
+       │               Meteor DDP 实时行情与成交流               │
+       └───────────────────────────┬────────────────────────────┘
+                                   │
+       ┌───────────────────────────▼────────────────────────────┐
+       │            360° 全景市场上下文构建器 (Context)           │
+       │  • 负责市场资产画像、余额与持仓上限 (Max Holding CNY)  │
+       │  • Top 5 盘口深度、微观流动性与单价物理单位 (Price Unit)│
+       │  • 历史成交记录与法定 CNY 实时盈亏看板 (PnL Tracker)   │
+       │  • 市场双向缺口与在单残缺度诊断 (Coverage & Health)    │
+       │  • 动态库存倾斜加价指导 (Dynamic Inventory Skew)       │
+       └───────────────────────────┬────────────────────────────┘
+                                   │ JSON 提示词
+       ┌───────────────────────────▼────────────────────────────┐
+       │               主流 LLM 决策推理引擎                    │
+       │     (Gemini 2.0 / GPT-4o / DeepSeek / Ollama)          │
+       └───────────────────────────┬────────────────────────────┘
+                                   │ 输出 JSON 意向 (Intents)
+       ┌───────────────────────────▼────────────────────────────┐
+       │             🛡️ 零信任硬风控护栏 (Guardrails)            │
+       │  • 市场范围锁 (Market Scoping Guard: 彻底隔离无关市场) │
+       │  • 法币下单额度硬截断熔断 (target_order_cny Cap)        │
+       │  • 最大持仓上限拦截 (max_holding_cny)                  │
+       │  • 双向价差保底锁 (Anti Self-Match: 严禁平价自成交)    │
+       │  • 冗余重复挂单自动清理撤单                            │
+       └───────────────────────────┬────────────────────────────┘
+                                   │ 原子打包提交
+       ┌───────────────────────────▼────────────────────────────┐
+       │         BitShares 区块链原生广播 (OP 77 / OP 1)        │
+       └────────────────────────────────────────────────────────┘
+```
+
+### 2. AI Agent 五大核心技术优势
+- **免费 Google AI Studio 原生支持**：使用 `gemini-2.0-flash` 模型，高吞吐低延迟，免去高昂 API 费用。
+- **智能自主门控与静默心跳（Gating & Pulse Heartbeat）**：仅在发生缺单、在单被吃超 50%、价格变动等实质信号时才唤醒 AI；平稳时终端保持单行脉冲心跳，绝不刷屏。
+- **动态库存倾斜（Dynamic Inventory Skew）**：越接近设定的资产持仓上限，买入挂单价格向下偏离折价越多；未设上限则视为无上限。
+- **多资产法定盈亏看板（PnL Dashboard）**：启动即自动汇总结算负责市场的撮合成交笔数、累计换手额与净盈亏。
+- **单价物理单位防混淆**：明确区分 `A/B` 市场单价单位为 `B per 1 A`，彻底避免买卖单数值颠倒错单。
 
 ---
 
@@ -47,11 +98,33 @@ uv run trade_bots_bollinger.py --pass btsbots/my_account --strategy bollinger
 
 ---
 
-## ⚙️ 配置文件说明 (`trade_rules.json`)
+## ⚙️ 配置文件说明 (`trade_rules.json` / `trade_rules-example.json`)
 
 ```json
 {
   "strategies": {
+    "ai_agent": {
+      "strategy_name": "AITradingAgent",
+      "description": "基于 Google AI Studio / OpenAI 的全自主量化交易 Agent",
+      "block_delay": 1.0,
+      "keep_bts_fees": 30.0,
+      "max_holding_cny": {
+        "XBTSX.USDT": 2000.0,
+        "CNY": 5000.0,
+        "BTS": 10000.0
+      },
+      "ai_agent": {
+        "provider": "gemini",
+        "model": "gemini-2.0-flash",
+        "api_base": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "api_key": "YOUR_GEMINI_API_KEY",
+        "max_price_deviation_pct": 15.0,
+        "min_maker_spread_pct": 1.5
+      },
+      "custom_price": { "CNY": [13.597625854, "BTS"] },
+      "default": { "target_order_cny": 50.0 },
+      "markets": [["BTS", "CNY"], ["BTS", "XBTSX.USDT"]]
+    },
     "simple": {
       "strategy_name": "SimpleMaker",
       "description": "基于公允法定价值 (CNY) 的简单做市策略",
@@ -111,6 +184,7 @@ uv run trade_bots_bollinger.py --pass btsbots/my_account --strategy bollinger
 | `self.get_total_balance(asset)` | `asset: str` | `float` | 获取资产总持仓（空闲余额 + 在单资产） |
 | `self.get_my_orders(sell, recv)`| `sell, recv: Optional[str]` | `List[dict]` | 获取当前账号在指定方向上的有效挂单（已清洗 order_id） |
 | `self.get_market_orders(sell, recv)` | `sell, recv: str` | `List[dict]` | 获取市场上除自身以外的盘口深度订单列表（按单价升序） |
+| `self.calculate_market_pnl(markets)` | `markets: Optional[list]` | `dict` | 统计指定市场的成交笔数、换手额及法定净盈亏 |
 | `self.get_order_by_id(order_id)` | `order_id: str` | `Optional[dict]` | 根据订单 ID 检索订单完整详情 |
 | `self.is_chain_synced()` | 无 | `Tuple[bool, delay, ts]`| 检查区块链时钟是否正常同步（30 秒容差） |
 

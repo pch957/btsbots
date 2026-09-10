@@ -13,7 +13,8 @@ MAX_SUBSCRIPTIONS_LIMIT: int = 50
 class TradeBots(BTSBots):
     """
     TradeBots: 交易机器人统一框架基类
-    - 自动双向市场展开: 配置 ["BTS", "CNY"] 自动双向注册 (BTS, CNY) 与 (CNY, BTS)
+    - 自动双向市场展开与全双向成交记录订阅 (fillOrder)
+    - 实时统计各市场多资产总成交量与法定 CNY 盈亏 (PnL)
     - 统一参数命名: 下单额度全盘采用法定 CNY 价值 (target_order_cny)
     - 终端 ANSI 强力原位刷新心跳 (\r\x1b[2K)，彻底杜绝刷屏
     - 自动时间戳日志注入: 所有交易日志统一附带 [时间 | 区块号]
@@ -62,7 +63,7 @@ class TradeBots(BTSBots):
             dest="strategy_name",
             type=str,
             default=self.strategy_name,
-            help="指定载入 trade_rules.json 中的具体策略名称",
+            help="指定载入配置文件中的具体策略名称",
         )
 
     async def run(self):
@@ -129,7 +130,7 @@ class TradeBots(BTSBots):
             "front_run_step": 0.0001
         })
 
-        # 🌟 自动双向市场注册：无论是 list 还是 dict，全自动包含 (A, B) 和反向 (B, A)
+        # 自动双向市场注册与参数继承
         self.markets_config = {}
         markets_raw = config_dict.get("markets", {})
 
@@ -140,15 +141,15 @@ class TradeBots(BTSBots):
                 if isinstance(item, list) and len(item) == 2:
                     a = item[0].upper().strip()
                     b = item[1].upper().strip()
-                    self.markets_config[(a, b)] = cfg
-                    self.markets_config[(b, a)] = cfg  # 自动双向展开
+                    self.markets_config[(a, b)] = dict(cfg)
+                    self.markets_config[(b, a)] = dict(cfg)
                 elif isinstance(item, dict):
                     base = item.get("base", "").upper().strip()
                     quote = item.get("quote", "").upper().strip()
                     if base and quote:
                         cfg.update(item)
-                        self.markets_config[(base, quote)] = cfg
-                        self.markets_config[(quote, base)] = cfg
+                        self.markets_config[(base, quote)] = dict(cfg)
+                        self.markets_config[(quote, base)] = dict(cfg)
         elif isinstance(markets_raw, dict):
             for a_s, sub_map in markets_raw.items():
                 for a_b, m_cfg in sub_map.items():
@@ -156,20 +157,23 @@ class TradeBots(BTSBots):
                     cfg = dict(self.default_market_params)
                     cfg.update(config_dict)
                     cfg.update(m_cfg)
-                    self.markets_config[pair] = cfg
+                    self.markets_config[pair] = dict(cfg)
                     
-                    # 若未配置反向，自动用 default 参数为反向兜底注册
                     rev_pair = (pair[1], pair[0])
                     if rev_pair not in self.markets_config:
                         rev_cfg = dict(self.default_market_params)
                         rev_cfg.update(config_dict)
-                        self.markets_config[rev_pair] = rev_cfg
+                        self.markets_config[rev_pair] = dict(rev_cfg)
 
     async def _init_trading_subscriptions(self):
         await self._safe_subscribe("balance", [{"u": self.account_name}])
         await self._safe_subscribe("orderBook", [self.account_name])
         await self._safe_subscribe("price", [])
+        # 全局用户成交记录订阅
+        await self._safe_subscribe("fillOrder", [{"u": self.account_name}])
 
+        # 双向市场深度与各市场成交记录订阅
+        subscribed_pairs = set()
         for (asset_a, asset_b) in self.markets_config.keys():
             await self._safe_subscribe("orderBook", [asset_a, asset_b])
             await self._safe_subscribe("orderBook", [asset_b, asset_a])
@@ -285,6 +289,76 @@ class TradeBots(BTSBots):
         return scale * self._get_raw_price(curr_ref)
 
     # ==========================
+    # 成交记录与盈亏统计 (PnL Tracker)
+    # ==========================
+
+    def calculate_market_pnl(self, markets: Optional[List[Tuple[str, str]]] = None) -> Dict[str, Any]:
+        """
+        统计指定市场的总成交笔数、总换手额、各代币净流动及按当前公允价折算的总盈亏
+        """
+        target_markets = markets or list(self.markets_config.keys())
+        target_pairs = set()
+        for (a, b) in target_markets:
+            target_pairs.add(tuple(sorted([a.upper().strip(), b.upper().strip()])))
+
+        asset_net_flow: Dict[str, float] = {}
+        total_trade_volume_cny = 0.0
+        fill_count = 0
+
+        fill_coll = self.collections.get("fill_order", {})
+        for doc in fill_coll.values():
+            users = doc.get("u", [])
+            # 判断当前用户是否参与了此笔撮合成交
+            if self.account_name not in users:
+                continue
+
+            assets = doc.get("a", [])
+            balances = doc.get("b", [])
+            if len(assets) != 2 or len(balances) != 2:
+                continue
+
+            a0, a1 = str(assets[0]).upper().strip(), str(assets[1]).upper().strip()
+            pair_key = tuple(sorted([a0, a1]))
+            if pair_key not in target_pairs:
+                continue
+
+            fill_count += 1
+            idx = users.index(self.account_name)
+            
+            # idx == 0 表示卖出 a0 得到 a1; idx == 1 表示卖出 a1 得到 a0
+            if idx == 0:
+                sold_asset, sold_amount = a0, float(balances[0])
+                bought_asset, bought_amount = a1, float(balances[1])
+            else:
+                sold_asset, sold_amount = a1, float(balances[1])
+                bought_asset, bought_amount = a0, float(balances[0])
+
+            asset_net_flow[sold_asset] = asset_net_flow.get(sold_asset, 0.0) - sold_amount
+            asset_net_flow[bought_asset] = asset_net_flow.get(bought_asset, 0.0) + bought_amount
+
+            p_sold_cny = self.get_price(sold_asset)
+            total_trade_volume_cny += sold_amount * p_sold_cny
+
+        net_pnl_cny = 0.0
+        flows_detail = {}
+        for asset, net_amt in asset_net_flow.items():
+            p_cny = self.get_price(asset)
+            cny_val = net_amt * p_cny
+            net_pnl_cny += cny_val
+            flows_detail[asset] = {
+                "net_amount": round(net_amt, 4),
+                "current_price_cny": round(p_cny, 8),
+                "net_value_cny": round(cny_val, 2)
+            }
+
+        return {
+            "total_fills_matched": fill_count,
+            "total_trade_turnover_cny": round(total_trade_volume_cny, 2),
+            "total_net_pnl_cny": round(net_pnl_cny, 2),
+            "asset_position_flows": flows_detail
+        }
+
+    # ==========================
     # 终端输出与自适应心跳
     # ==========================
 
@@ -307,7 +381,7 @@ class TradeBots(BTSBots):
         sys.stdout.flush()
 
     def render_pulse_heartbeat(self, block_num: int, chain_time_str: str, delay_sec: float):
-        pulse_msg = f"💓 [Pulse] 区块 #{block_num} | {chain_time_str} | 同步正常 (延迟 {delay_sec:.1f}s)"
+        pulse_msg = f"💓 [Pulse] 区块 #{block_num} | {chain_time_str}"
         self.print_heartbeat(pulse_msg)
 
     def clean_order_id(self, raw_id: Any) -> str:

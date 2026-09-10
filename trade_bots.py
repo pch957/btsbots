@@ -4,7 +4,7 @@ from btsbots.tradebots import TradeBots
 
 class SimpleTradeBot(TradeBots):
     """
-    使用 TradeBots 基础框架的简单做市策略机器人 (极简 update 接口)
+    使用 TradeBots 基础框架的简单做市策略机器人 (含 50% 补单检测)
     """
     async def calculate_strategy(self, block_num: int) -> Optional[List[Dict[str, Any]]]:
         intents = []
@@ -90,16 +90,19 @@ class SimpleTradeBot(TradeBots):
                     delta = min(delta, curr_avail_free)
                     target_amount_sell = curr_b + delta
 
-                needs_update = (price_dev > 0.003) or (abs(delta) > max(1.0, target_amount_sell * 0.01))
+                # 🌟 50% 订单被吃补单触发器
+                is_half_filled = (curr_b > 0 and (abs(target_amount_sell - curr_b) / target_amount_sell) >= 0.5)
+                is_amount_diff_large = abs(delta) > max(1.0, target_amount_sell * 0.01)
+                needs_update = (price_dev > 0.003) or is_amount_diff_large or is_half_filled
 
-                # 🌟 极简调用：只需传 order_id, price, amount
                 if needs_update and target_amount_sell > 1e-4:
+                    reason_str = "在单被吃达50%触发补单" if is_half_filled else f"策略调优: 偏离 {price_dev*100:.2f}%"
                     intents.append({
                         "action": "update",
                         "order_id": oid,
                         "price": target_sell_price,
                         "amount": target_amount_sell,
-                        "reason": f"策略调优: 偏离 {price_dev*100:.2f}% (指导价: {fair_price:.8f}), 量: {curr_b:.4f} -> {target_amount_sell:.4f}"
+                        "reason": f"{reason_str} (指导价: {fair_price:.8f}), 量: {curr_b:.4f} -> {target_amount_sell:.4f}"
                     })
                     if delta > 0:
                         remaining_free_balances[a_s] = max(0.0, curr_avail_free - delta)

@@ -1,5 +1,27 @@
 {
   "strategies": {
+    "ai_agent": {
+      "strategy_name": "AITradingAgent",
+      "description": "基于 Google AI Studio (Gemini 2.0) / OpenAI 的全自主量化交易 Agent (智能门控 + 自动去重 + 持仓限额)",
+      "block_delay": 1.0,
+      "keep_bts_fees": 30.0,
+      "max_holding_cny": {
+        "XBTSX.USDT": 2000.0,
+        "CNY": 5000.0,
+        "BTS": 10000.0
+      },
+      "ai_agent": {
+        "provider": "gemini",
+        "model": "gemini-2.0-flash",
+        "api_base": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "api_key": "YOUR_GEMINI_API_KEY",
+        "max_price_deviation_pct": 15.0,
+        "min_maker_spread_pct": 1.5
+      },
+      "custom_price": { "CNY": [13.597625854, "BTS"] },
+      "default": { "target_order_cny": 50.0 },
+      "markets": [["BTS", "CNY"], ["BTS", "XBTSX.USDT"]]
+    },
     "simple": {
       "strategy_name": "SimpleMaker",
       "description": "基于公允法定价值 (CNY) 的简单双向做市",
