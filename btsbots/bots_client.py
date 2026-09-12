@@ -62,7 +62,7 @@ class BotsClient(MeteorDDPClient):
         login_res = await self.call("login", {"btsWallet": auth_payload})
         self.user_id = login_res.get("id")
         _, self.bts_id = await self.get_account_brief(self.account_name)
-        print(f"✓ [BotsClient] 登录成功！分配的 Session 用户 ID: {self.user_id}")
+        print(f"✓ [BotsClient] 登录成功！")
 
     async def _resolve_account_active_pubkey(self, account_name: str) -> str:
         """从链上获取账号的 Active Key 并在本地密钥库中核对存在性"""

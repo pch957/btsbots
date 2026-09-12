@@ -47,7 +47,7 @@ class AITradingAgent(TradeBots):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.ai_provider = "gemini"
-        self.ai_model = "gemini-2.0-flash"
+        self.ai_model = "gemini-3.5-flash-lite"
         self.api_key = ""
         self.api_base = ""
         self.max_price_deviation_pct = 15.0
@@ -67,7 +67,7 @@ class AITradingAgent(TradeBots):
         super().parse_config(config_dict)
         ai_cfg = config_dict.get("ai_agent", {})
         self.ai_provider = ai_cfg.get("provider", "gemini").lower().strip()
-        self.ai_model = ai_cfg.get("model", "gemini-2.0-flash")
+        self.ai_model = ai_cfg.get("model", "gemini-3.5-flash-lite")
         
         env_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
         self.api_key = ai_cfg.get("api_key") or env_key

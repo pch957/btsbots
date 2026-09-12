@@ -25,7 +25,7 @@ class InvitationTool(BotsClient):
                     return
 
                 print(f"[*] 正在为 VIP 账号 [{self.account_name}] 批量生成 {args.count} 个邀请码...")
-                res = await self.call("generateInvitation", self.account_name, args.count)
+                res = await self.call("generateInvitation", args.count)
                 
                 # 兼容防错：如果服务端返回的恰好是 string（防止历史旧版缓存），转为 dict 处理
                 if isinstance(res, str):
@@ -40,7 +40,7 @@ class InvitationTool(BotsClient):
 
             elif args.action == "list":
                 print(f"[*] 正在通过 RPC 获取账号 [{self.account_name}] 的邀请码列表...")
-                invitations = await self.call("listInvitations", self.account_name)
+                invitations = await self.call("listInvitations")
                 
                 print("==================================================")
                 print(f" 📋 邀请码列表 (共 {len(invitations)} 个) | VIP 状态: {'🟢 已激活' if is_vip else '🔴 未开通'}:")

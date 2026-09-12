@@ -114,7 +114,7 @@ class SignBots(BTSBots):
 
         self.on_data_changed = _on_queue_income
         await self.subscribe("allPendingSignRequests")
-        await self.subscribe("pendingAccountRegistrations", [self.account_name])
+        await self.subscribe("pendingAccountRegistrations")
         print("⚡ [BTSBots 签名网关] 零信任安全守卫与邀请注册监听器已全面启动...\n")
 
     async def _process_account_registration(self, doc_id: str, fields: dict):
